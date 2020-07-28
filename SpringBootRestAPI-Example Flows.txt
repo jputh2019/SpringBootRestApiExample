@@ -1,0 +1,379 @@
+REST stands for Representational State Transfer.It’s an is an architectural style which can be used to design web services, that can be consumed from a variety of clients. The core idea is that, rather than using complex mechanisms such as CORBA, RPC or SOAP to connect between machines, simple HTTP is used to make calls among them.
+
+In Rest based design, resources are being manipulated using a common set of verbs.
+
+To Create a resource 	: HTTP POST should be used
+To Retrieve a resource 	: HTTP GET should be used
+To Update a resource 	: HTTP PUT should be used
+To Delete a resource 	: HTTP DELETE should be used
+
+That means, you as a REST service developer or Client, should comply to above criteria, in order to be REST complained.
+
+Often Rest based Web services return JSON or XML as response, although it is not limited to these types only. Clients can specify (using HTTP Accept header) the resource type they are interested in, and server may return the resource ,specifying Content-Type of the resource it is serving. 
+
+Following technologies stack being used:
+	Spring Boot 1.4.3.RELEASE
+	Spring 4.3.5.RELEASE [transitively]
+	Maven 3.1
+	JDK 1.8
+
+1. Dependency Management [pom.xml]
+2. Main class [Application]
+3. REST Controller
+
+	Following is one possible Rest based controller, implementing REST API. I said possible, means Other’s may implement it in another way, still (or even more pure way) conforming to REST style.
+
+	This is what our REST API does:
+
+	GET request to /api/user/ returns a list of users
+	GET request to /api/user/1 returns the user with ID 1
+	POST request to /api/user/ with a user object as JSON creates a new user
+	PUT request to /api/user/3 with a user object as JSON updates the user with ID 3
+	DELETE request to /api/user/4 deletes the user with ID 4
+	DELETE request to /api/user/ deletes all the users
+
+package com.demo.springboot.controller;
+ 
+import java.util.List;
+ 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.UriComponentsBuilder;
+ 
+import com.demo.springboot.model.User;
+import com.demo.springboot.service.UserService;
+import com.demo.springboot.util.CustomErrorType;
+ 
+@RestController
+@RequestMapping("/api")
+public class RestApiController {
+ 
+    public static final Logger logger = LoggerFactory.getLogger(RestApiController.class);
+ 
+    @Autowired
+    UserService userService; //Service which will do all data retrieval/manipulation work
+ 
+    // -------------------Retrieve All Users---------------------------------------------
+ 
+    @RequestMapping(value = "/user/", method = RequestMethod.GET)
+    public ResponseEntity<List<User>> listAllUsers() {
+        List<User> users = userService.findAllUsers();
+        if (users.isEmpty()) {
+            return new ResponseEntity(HttpStatus.NO_CONTENT);
+            // You many decide to return HttpStatus.NOT_FOUND
+        }
+        return new ResponseEntity<List<User>>(users, HttpStatus.OK);
+    }
+ 
+    // -------------------Retrieve Single User------------------------------------------
+ 
+    @RequestMapping(value = "/user/{id}", method = RequestMethod.GET)
+    public ResponseEntity<?> getUser(@PathVariable("id") long id) {
+        logger.info("Fetching User with id {}", id);
+        User user = userService.findById(id);
+        if (user == null) {
+            logger.error("User with id {} not found.", id);
+            return new ResponseEntity(new CustomErrorType("User with id " + id 
+                    + " not found"), HttpStatus.NOT_FOUND);
+        }
+        return new ResponseEntity<User>(user, HttpStatus.OK);
+    }
+ 
+    // -------------------Create a User-------------------------------------------
+ 
+    @RequestMapping(value = "/user/", method = RequestMethod.POST)
+    public ResponseEntity<?> createUser(@RequestBody User user, UriComponentsBuilder ucBuilder) {
+        logger.info("Creating User : {}", user);
+ 
+        if (userService.isUserExist(user)) {
+            logger.error("Unable to create. A User with name {} already exist", user.getName());
+            return new ResponseEntity(new CustomErrorType("Unable to create. A User with name " + 
+            user.getName() + " already exist."),HttpStatus.CONFLICT);
+        }
+        userService.saveUser(user);
+ 
+        HttpHeaders headers = new HttpHeaders();
+        headers.setLocation(ucBuilder.path("/api/user/{id}").buildAndExpand(user.getId()).toUri());
+        return new ResponseEntity<String>(headers, HttpStatus.CREATED);
+    }
+ 
+    // ------------------- Update a User ------------------------------------------------
+ 
+    @RequestMapping(value = "/user/{id}", method = RequestMethod.PUT)
+    public ResponseEntity<?> updateUser(@PathVariable("id") long id, @RequestBody User user) {
+        logger.info("Updating User with id {}", id);
+ 
+        User currentUser = userService.findById(id);
+ 
+        if (currentUser == null) {
+            logger.error("Unable to update. User with id {} not found.", id);
+            return new ResponseEntity(new CustomErrorType("Unable to upate. User with id " + id + " not found."),
+                    HttpStatus.NOT_FOUND);
+        }
+ 
+        currentUser.setName(user.getName());
+        currentUser.setAge(user.getAge());
+        currentUser.setSalary(user.getSalary());
+ 
+        userService.updateUser(currentUser);
+        return new ResponseEntity<User>(currentUser, HttpStatus.OK);
+    }
+ 
+    // ------------------- Delete a User-----------------------------------------
+ 
+    @RequestMapping(value = "/user/{id}", method = RequestMethod.DELETE)
+    public ResponseEntity<?> deleteUser(@PathVariable("id") long id) {
+        logger.info("Fetching & Deleting User with id {}", id);
+ 
+        User user = userService.findById(id);
+        if (user == null) {
+            logger.error("Unable to delete. User with id {} not found.", id);
+            return new ResponseEntity(new CustomErrorType("Unable to delete. User with id " + id + " not found."),
+                    HttpStatus.NOT_FOUND);
+        }
+        userService.deleteUserById(id);
+        return new ResponseEntity<User>(HttpStatus.NO_CONTENT);
+    }
+ 
+    // ------------------- Delete All Users-----------------------------
+ 
+    @RequestMapping(value = "/user/", method = RequestMethod.DELETE)
+    public ResponseEntity<User> deleteAllUsers() {
+        logger.info("Deleting All Users");
+ 
+        userService.deleteAllUsers();
+        return new ResponseEntity<User>(HttpStatus.NO_CONTENT);
+    }
+ 
+}
+Detailed Explanation :
+
+@RestController : First of all, we are using Spring 4’s new @RestController annotation. This annotation eliminates the need of annotating each method with @ResponseBody. Under the hood, @RestController is itself annotated with @ResponseBody, and can be considered as combination of @Controller and @ResponseBody.
+
+@RequestBody : If a method parameter is annotated with @RequestBody, Spring will bind the incoming HTTP request body(for the URL mentioned in @RequestMapping for that method) to that parameter. While doing that, Spring will [behind the scenes] use HTTP Message converters to convert the HTTP request body into domain object [deserialize request body to domain object], based on ACCEPT or Content-Type header present in request.
+
+@ResponseBody : If a method is annotated with @ResponseBody, Spring will bind the return value to outgoing HTTP response body. While doing that, Spring will [behind the scenes] use HTTP Message converters to convert the return value to HTTP response body [serialize the object to response body], based on Content-Type present in request HTTP header. As already mentioned, in Spring 4, you may stop using this annotation.
+
+ResponseEntity is a real deal. It represents the entire HTTP response. Good thing about it is that you can control anything that goes into it. You can specify status code, headers, and body. It comes with several constructors to carry the information you want to sent in HTTP Response.
+
+@PathVariable This annotation indicates that a method parameter should be bound to a URI template variable [the one in ‘{}’].
+
+Basically, @RestController , @RequestBody, ResponseEntity & @PathVariable are all you need to know to implement a REST API in Spring. Additionally, spring provides several support classes to help you implement something customized.
+
+MediaType : Although we didn’t, with @RequestMapping annotation, you can additionally, specify the MediaType to be produced or consumed (using produces or consumes attributes) by that particular controller method, to further narrow down the mapping.
+
+
+4) Testing the API
+	1. Retrieve all users
+		Open POSTMAN tool, Create a Collection and Add Request 
+		select request type [GET for this usecase], 
+		specify the uri http://localhost:8080/SpringBootRestApi/api/user/ and Send., should retrieve all users.
+	2. Retrieve a single user
+		Use GET, specify the id of the user you are looking for and send.
+	3. Retrieve an unknown user
+		Use GET, specify the wrong id of the user, and send.
+	4. Create a User
+		Use POST, specify the content in body, select content-type as ‘application/json’Send. 
+		New user would be created and will be accessible at the location mentioned in Location header.
+	5. Create a User with an existing user-name
+		Use POST, specify the content in body with name of an existing user,Send, should get a 409/conflict.
+	6. Update an existing user
+		Use PUT, specify the content in body and type as ‘application/json’.Send, the user should be updated at server.
+	7. Delete an existing user
+		Use DELETE, specify the id in url, send. User should be deleted from server.
+	8. Delete all users
+		Use DELETE, do not specify any id, send. All users should be deleted from server.
+	9. Verify the results
+		Use GET to retrieve all users, send, should not get any user in response.
+
+5) Writing REST Client using RestTemplate
+
+Postman tool we used above is a wonderful Client to test Rest API. But if you want to consume REST based web services from your application, you would need a REST client for your application. One of the most popular HTTP client is Apache HttpComponents HttpClient. But the details to access REST services using this are too low level.
+
+Spring’s RestTemplate comes to Rescue. RestTemplate provides higher level methods that correspond to each of the six main HTTP methods that make invoking many RESTful services a one-liner and enforce REST best practices.
+
+Spring Boot provides RestTemplateBuilder that can be used to customize the RestTemplate before calling the REST endpoints. Since in this post we are not customizing the REST template [No additional header e.g.], we may prefer to directly use RestTemplate.
+
+Below shown are HTTP methods and corresponding RestTemplate methods to handle that type of HTTP request.
+
+HTTP Methods and corresponding RestTemplate methods:
+
+	1.HTTP GET 		: getForObject, getForEntity
+	2.HTTP PUT 		: put(String url, Object request, String…​urlVariables)
+	3.HTTP DELETE 	: delete
+	4.HTTP POST 	: postForLocation(String url, Object request, String…​ urlVariables), postForObject(String url, 
+						Object request, Class responseType, String…​ 		uriVariables)
+	5.HTTP HEAD 	: headForHeaders(String url, String…​ urlVariables)
+	6.HTTP OPTIONS 	: optionsForAllow(String url, String…​ urlVariables)
+	7.HTTP PATCH    : exchange execute
+
+Custom Rest client, consuming the REST services created earlier.
+
+package com.demo.springboot;
+  
+import java.net.URI;
+import java.util.LinkedHashMap;
+import java.util.List;
+ 
+import com.demo.springboot.model.User;
+import org.springframework.web.client.RestTemplate;
+  
+ 
+public class SpringBootRestTestClient {
+  
+    public static final String REST_SERVICE_URI = "<a class="vglnk" href="http://localhost:8080/SpringBootRestApi/api" rel="nofollow"><span>http</span><span>://</span><span>localhost</span><span>:</span><span>8080</span><span>/</span><span>SpringBootRestApi</span><span>/</span><span>api</span></a>";
+      
+    /* GET */
+    @SuppressWarnings("unchecked")
+    private static void listAllUsers(){
+        System.out.println("Testing listAllUsers API-----------");
+          
+        RestTemplate restTemplate = new RestTemplate();
+        List<LinkedHashMap<String, Object>> usersMap = restTemplate.getForObject(REST_SERVICE_URI+"/user/", List.class);
+          
+        if(usersMap!=null){
+            for(LinkedHashMap<String, Object> map : usersMap){
+                System.out.println("User : id="+map.get("id")+", Name="+map.get("name")+", Age="+map.get("age")+", Salary="+map.get("salary"));;
+            }
+        }else{
+            System.out.println("No user exist----------");
+        }
+    }
+      
+    /* GET */
+    private static void getUser(){
+        System.out.println("Testing getUser API----------");
+        RestTemplate restTemplate = new RestTemplate();
+        User user = restTemplate.getForObject(REST_SERVICE_URI+"/user/1", User.class);
+        System.out.println(user);
+    }
+      
+    /* POST */
+    private static void createUser() {
+        System.out.println("Testing create User API----------");
+        RestTemplate restTemplate = new RestTemplate();
+        User user = new User(0,"Sarah",51,134);
+        URI uri = restTemplate.postForLocation(REST_SERVICE_URI+"/user/", user, User.class);
+        System.out.println("Location : "+uri.toASCIIString());
+    }
+  
+    /* PUT */
+    private static void updateUser() {
+        System.out.println("Testing update User API----------");
+        RestTemplate restTemplate = new RestTemplate();
+        User user  = new User(1,"Tomy",33, 70000);
+        restTemplate.put(REST_SERVICE_URI+"/user/1", user);
+        System.out.println(user);
+    }
+  
+    /* DELETE */
+    private static void deleteUser() {
+        System.out.println("Testing delete User API----------");
+        RestTemplate restTemplate = new RestTemplate();
+        restTemplate.delete(REST_SERVICE_URI+"/user/3");
+    }
+  
+  
+    /* DELETE */
+    private static void deleteAllUsers() {
+        System.out.println("Testing all delete Users API----------");
+        RestTemplate restTemplate = new RestTemplate();
+        restTemplate.delete(REST_SERVICE_URI+"/user/");
+    }
+  
+    public static void main(String args[]){
+        listAllUsers();
+        getUser();
+        createUser();
+        listAllUsers();
+        updateUser();
+        listAllUsers();
+        deleteUser();
+        listAllUsers();
+        deleteAllUsers();
+        listAllUsers();
+    }
+}
+6. Service & model
+
+Re-start the REST Application, in order to repopulate the data, and then run this client.
+
+Testing listAllUsers API-----------
+15:20:26.239 [main] DEBUG org.springframework.web.client.RestTemplate - Created GET request for "http://localhost:8080/SpringBootRestApi/api/user/"
+15:20:26.254 [main] DEBUG org.springframework.web.client.RestTemplate - Setting request Accept header to [application/xml, text/xml, application/json, application/*+xml, application/*+json]
+15:20:26.366 [main] DEBUG org.springframework.web.client.RestTemplate - GET request for "http://localhost:8080/SpringBootRestApi/api/user/" resulted in 200 (null)
+15:20:26.367 [main] DEBUG org.springframework.web.client.RestTemplate - Reading [interface java.util.List] as "application/xml;charset=UTF-8" using [org.springframework.http.converter.xml.MappingJackson2XmlHttpMessageConverter@5c072e3f]
+User : id=1, Name=Sam, Age=30, Salary=70000.0
+User : id=2, Name=Tom, Age=40, Salary=50000.0
+User : id=3, Name=Jerome, Age=45, Salary=30000.0
+User : id=4, Name=Silvia, Age=50, Salary=40000.0
+Testing getUser API----------
+15:20:26.419 [main] DEBUG org.springframework.web.client.RestTemplate - Created GET request for "http://localhost:8080/SpringBootRestApi/api/user/1"
+15:20:26.444 [main] DEBUG org.springframework.web.client.RestTemplate - Setting request Accept header to [application/xml, text/xml, application/json, application/*+xml, application/*+json]
+15:20:26.456 [main] DEBUG org.springframework.web.client.RestTemplate - GET request for "http://localhost:8080/SpringBootRestApi/api/user/1" resulted in 200 (null)
+15:20:26.456 [main] DEBUG org.springframework.web.client.RestTemplate - Reading [class com.demo.springboot.model.User] as "application/xml;charset=UTF-8" using [org.springframework.http.converter.xml.MappingJackson2XmlHttpMessageConverter@3ec300f1]
+User [id=1, name=Sam, age=30, salary=70000.0]
+Testing create User API----------
+15:20:26.466 [main] DEBUG org.springframework.web.client.RestTemplate - Created POST request for "http://localhost:8080/SpringBootRestApi/api/user/"
+15:20:26.477 [main] DEBUG org.springframework.web.client.RestTemplate - Writing [User [id=0, name=Sarah, age=51, salary=134.0]] using [org.springframework.http.converter.xml.MappingJackson2XmlHttpMessageConverter@3b2cf7ab]
+15:20:26.541 [main] DEBUG org.springframework.web.client.RestTemplate - POST request for "http://localhost:8080/SpringBootRestApi/api/user/" resulted in 201 (null)
+Location : http://localhost:8080/SpringBootRestApi/api/user/5
+Testing listAllUsers API-----------
+15:20:26.546 [main] DEBUG org.springframework.web.client.RestTemplate - Created GET request for "http://localhost:8080/SpringBootRestApi/api/user/"
+15:20:26.547 [main] DEBUG org.springframework.web.client.RestTemplate - Setting request Accept header to [application/xml, text/xml, application/json, application/*+xml, application/*+json]
+15:20:26.550 [main] DEBUG org.springframework.web.client.RestTemplate - GET request for "http://localhost:8080/SpringBootRestApi/api/user/" resulted in 200 (null)
+15:20:26.550 [main] DEBUG org.springframework.web.client.RestTemplate - Reading [interface java.util.List] as "application/xml;charset=UTF-8" using [org.springframework.http.converter.xml.MappingJackson2XmlHttpMessageConverter@ec756bd]
+User : id=1, Name=Sam, Age=30, Salary=70000.0
+User : id=2, Name=Tom, Age=40, Salary=50000.0
+User : id=3, Name=Jerome, Age=45, Salary=30000.0
+User : id=4, Name=Silvia, Age=50, Salary=40000.0
+User : id=5, Name=Sarah, Age=51, Salary=134.0
+Testing update User API----------
+15:20:26.560 [main] DEBUG org.springframework.web.client.RestTemplate - Created PUT request for "http://localhost:8080/SpringBootRestApi/api/user/1"
+15:20:26.560 [main] DEBUG org.springframework.web.client.RestTemplate - Writing [User [id=1, name=Tomy, age=33, salary=70000.0]] using [org.springframework.http.converter.xml.MappingJackson2XmlHttpMessageConverter@14d3bc22]
+15:20:26.567 [main] DEBUG org.springframework.web.client.RestTemplate - PUT request for "http://localhost:8080/SpringBootRestApi/api/user/1" resulted in 200 (null)
+User [id=1, name=Tomy, age=33, salary=70000.0]
+Testing listAllUsers API-----------
+15:20:26.573 [main] DEBUG org.springframework.web.client.RestTemplate - Created GET request for "http://localhost:8080/SpringBootRestApi/api/user/"
+15:20:26.577 [main] DEBUG org.springframework.web.client.RestTemplate - Setting request Accept header to [application/xml, text/xml, application/json, application/*+xml, application/*+json]
+15:20:26.581 [main] DEBUG org.springframework.web.client.RestTemplate - GET request for "http://localhost:8080/SpringBootRestApi/api/user/" resulted in 200 (null)
+15:20:26.581 [main] DEBUG org.springframework.web.client.RestTemplate - Reading [interface java.util.List] as "application/xml;charset=UTF-8" using [org.springframework.http.converter.xml.MappingJackson2XmlHttpMessageConverter@79efed2d]
+User : id=1, Name=Tomy, Age=33, Salary=70000.0
+User : id=2, Name=Tom, Age=40, Salary=50000.0
+User : id=3, Name=Jerome, Age=45, Salary=30000.0
+User : id=4, Name=Silvia, Age=50, Salary=40000.0
+User : id=5, Name=Sarah, Age=51, Salary=134.0
+Testing delete User API----------
+15:20:26.590 [main] DEBUG org.springframework.web.client.RestTemplate - Created DELETE request for "http://localhost:8080/SpringBootRestApi/api/user/3"
+15:20:26.594 [main] DEBUG org.springframework.web.client.RestTemplate - DELETE request for "http://localhost:8080/SpringBootRestApi/api/user/3" resulted in 204 (null)
+Testing listAllUsers API-----------
+15:20:26.607 [main] DEBUG org.springframework.web.client.RestTemplate - Created GET request for "http://localhost:8080/SpringBootRestApi/api/user/"
+15:20:26.607 [main] DEBUG org.springframework.web.client.RestTemplate - Setting request Accept header to [application/xml, text/xml, application/json, application/*+xml, application/*+json]
+15:20:26.609 [main] DEBUG org.springframework.web.client.RestTemplate - GET request for "http://localhost:8080/SpringBootRestApi/api/user/" resulted in 200 (null)
+15:20:26.609 [main] DEBUG org.springframework.web.client.RestTemplate - Reading [interface java.util.List] as "application/xml;charset=UTF-8" using [org.springframework.http.converter.xml.MappingJackson2XmlHttpMessageConverter@18ce0030]
+User : id=1, Name=Tomy, Age=33, Salary=70000.0
+User : id=2, Name=Tom, Age=40, Salary=50000.0
+User : id=4, Name=Silvia, Age=50, Salary=40000.0
+User : id=5, Name=Sarah, Age=51, Salary=134.0
+Testing all delete Users API----------
+15:20:26.616 [main] DEBUG org.springframework.web.client.RestTemplate - Created DELETE request for "http://localhost:8080/SpringBootRestApi/api/user/"
+15:20:26.623 [main] DEBUG org.springframework.web.client.RestTemplate - DELETE request for "http://localhost:8080/SpringBootRestApi/api/user/" resulted in 204 (null)
+Testing listAllUsers API-----------
+15:20:26.629 [main] DEBUG org.springframework.web.client.RestTemplate - Created GET request for "http://localhost:8080/SpringBootRestApi/api/user/"
+15:20:26.629 [main] DEBUG org.springframework.web.client.RestTemplate - Setting request Accept header to [application/xml, text/xml, application/json, application/*+xml, application/*+json]
+15:20:26.631 [main] DEBUG org.springframework.web.client.RestTemplate - GET request for "http://localhost:8080/SpringBootRestApi/api/user/" resulted in 204 (null)
+No user exist---------
+
+
+
+
+Rest API with Spring Boot is no-different than with Spring MVC, only the underlying application differs. Spring boot quietly simplifies it,
